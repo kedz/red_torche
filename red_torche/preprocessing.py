@@ -26,11 +26,11 @@ def rouge_ngram_preprocess(document, summaries, ngram=1, length=100):
             summary_word_count[vocab[token]] += 1
         summary_word_counts.append(summary_word_count)         
         
-    summary_wc_tensor = torch.LongTensor(len(summaries), len(vocab) + 2)
+    summary_wc_tensor = torch.LongTensor(1, len(summaries), len(vocab) + 2)
     summary_wc_tensor.fill_(0)
     for i, wc in enumerate(summary_word_counts):
         for w, c in wc.items():
-            summary_wc_tensor[i, w] = c
+            summary_wc_tensor[0, i, w] = c
    
     doc_tensor = []
     for sentence in document:
