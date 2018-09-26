@@ -9,8 +9,8 @@ import rouge_papier
 class TestRedTorche(unittest.TestCase):
 
     def assertTensorEqual(self, x, y, tolerance=1e-6):
-        if isinstance(x, (torch.LongTensor, torch.cuda.LongTensor)) or \
-                isinstance(y, (torch.LongTensor, torch.cuda.LongTensor)):
+        if isinstance(x, (torch.LongTensor)) or \
+                isinstance(y, (torch.LongTensor)):
             self.assertTrue(torch.all(torch.abs(x - y).float().lt(tolerance)))
         else:
     
@@ -84,15 +84,50 @@ class TestRedTorche(unittest.TestCase):
         wc3 = rt.word_counts(summary_tensor3, ref_wc3.size(-1))
         expected_rouge3 = self.reference_rouge(
             ["\n".join(summary_sents1)], [ref_summaries3], length=10)
-        rouge3 = rt.rouge_n(wc3, ref_wc3, reduction=None)
+        rouge3 = rt.rouge_n(wc3, ref_wc3)
 
         self.assertTensorEqual(rouge3, expected_rouge3) 
 
-
-
     def test_mask_length(self):
-        pass
+       
+        docs1 = torch.LongTensor(
+            [[[2, 3, 1, 0],
+              [5, 4, 1, 0],
+              [2, 1, 5, 1],
+              [2, 5, 4, 1]],
+             [[1, 2, 3, 4],
+              [4, 2, 0, 0],
+              [1, 2, 3, 0],
+              [5, 6, 7, 8]]])
+        expected_masked_docs1 = torch.LongTensor(
+            [[[2, 3, 1, 0],
+              [5, 4, 1, 0],
+              [2, 1, 5, 1],
+              [0, 0, 0, 0]],
+             [[1, 2, 3, 4],
+              [4, 2, 0, 0],
+              [1, 2, 3, 0],
+              [5, 0, 0, 0]]])
 
+        masked_docs1 = rt.mask_length(docs1, 10)
+        self.assertTensorEqual(masked_docs1, expected_masked_docs1)
+    
+        docs2 = torch.LongTensor(
+            [[2, 3, 0, 0],
+             [5, 0, 0, 0],
+             [2, 1, 5, 1],
+             [2, 5, 4, 1],
+             [3, 4, 5, 2]])
+
+        expected_masked_docs2 = torch.LongTensor(
+            [[[2, 3, 0, 0],
+              [5, 0, 0, 0],
+              [0, 0, 0, 0],
+              [0, 0, 0, 0],
+              [0, 0, 0, 0]]])
+
+        masked_docs2 = rt.mask_length(docs2, 3)
+        self.assertTensorEqual(masked_docs2, expected_masked_docs2)
 
     def reference_rouge(self, system_summaries, reference_summaries, order=1,
                         length=100):
@@ -112,22 +147,200 @@ class TestRedTorche(unittest.TestCase):
                 length=length)
             return torch.FloatTensor(df.values[:-1, order - 1])
 
+
+    def test_rouge_recall_interface(self):
+
+        docs = [["a b c d", "e f g h", "a b c e", "a a a b b"],
+                ["d d d c e f", "z z d d", "e f f", "g f f e w", "a e f"]]
+        summaries = [["a a a b c d e s a f g e a a s f a",
+                      "z b b b d e a a g h t d k a j f s"],
+                     ["z z d e f w d d   d a g h e k a s"]]
+
+        docs_tensors = []
+        ref_word_counts = []
+        for docs_i, summaries_i in zip(docs, summaries):
+            dt, wc = rt.rouge_ngram_preprocess(docs_i, summaries_i, length=10)
+            docs_tensors.append(dt)
+            ref_word_counts.append(wc)
+        docs_tensors = rt.stack_documents(docs_tensors)  
+        self.assertTrue(docs_tensors.size(0) == 2)
+        self.assertTrue(docs_tensors.size(1) == 5)
+        self.assertTrue(docs_tensors.size(2) == 6)
+        ref_word_counts = rt.stack_word_counts(ref_word_counts)
+        self.assertTrue(ref_word_counts.size(0) == 2)
+        self.assertTrue(ref_word_counts.size(1) == 2)
+        self.assertTrue(ref_word_counts.size(2) == 12)
+        self.assertTrue(torch.all(ref_word_counts[0].sum(-1).eq(10)))
+        self.assertTensorEqual(
+            ref_word_counts[1].sum(-1).view(-1), torch.LongTensor([10, 0]))
+        
+        rouge = rt.rouge_recall(docs_tensors, ref_word_counts, length=10)
+        ref_rouge = self.reference_rouge(
+            ["\n".join(d) for d in docs], summaries, length=10)
+        
+        self.assertTensorEqual(rouge, ref_rouge)
+
+
+    def test_rouge_recall_from_labels_interface(self):
+
+        docs = [["a b c d", "e f g h", "a b c e", "a a a b b"],
+                ["d d d c e f", "z z d d", "e f f", "g f f e w", "a e f"]]
+        summaries = [["a a a b c d e s a f g e a a s f a",
+                      "z b b b d e a a g h t d k a j f s"],
+                     ["z z d e f w d d   d a g h e k a s"]]
+
+        docs_tensors = []
+        ref_word_counts = []
+        for docs_i, summaries_i in zip(docs, summaries):
+            dt, wc = rt.rouge_ngram_preprocess(docs_i, summaries_i, length=10)
+            docs_tensors.append(dt)
+            ref_word_counts.append(wc)
+        docs_tensors = rt.stack_documents(docs_tensors)  
+        self.assertTrue(docs_tensors.size(0) == 2)
+        self.assertTrue(docs_tensors.size(1) == 5)
+        self.assertTrue(docs_tensors.size(2) == 6)
+        ref_word_counts = rt.stack_word_counts(ref_word_counts)
+        self.assertTrue(ref_word_counts.size(0) == 2)
+        self.assertTrue(ref_word_counts.size(1) == 2)
+        self.assertTrue(ref_word_counts.size(2) == 12)
+        self.assertTrue(torch.all(ref_word_counts[0].sum(-1).eq(10)))
+        self.assertTensorEqual(
+            ref_word_counts[1].sum(-1).view(-1), torch.LongTensor([10, 0]))
+        
+        batch_size = docs_tensors.size(0)
+        doc_size = docs_tensors.size(1)
+        
+        labels1 = torch.distributions.Bernoulli(torch.tensor([.75])).sample(
+            (batch_size, doc_size)).long().squeeze(-1)
+        rouge1 = rt.rouge_recall_from_labels(
+            docs_tensors, ref_word_counts, 
+            labels1, length=10)
+
+        sample_docs1 = []
+        sample_refs1 = []
+        for batch in range(batch_size):
+                sample_doc = []
+                for i, label in enumerate(
+                        labels1[batch,:len(docs[batch])]):
+                    if label.item() == 1:
+                        sample_doc.append(docs[batch][i])
+                sample_docs1.append("\n".join(sample_doc))
+                sample_refs1.append(summaries[batch])
+        ref_rouge1 = self.reference_rouge(
+            sample_docs1, sample_refs1, length=10)
+        self.assertTensorEqual(rouge1, ref_rouge1)
+        
+        sample_size = 3 
+        
+        labels2 = torch.distributions.Bernoulli(torch.tensor([.75])).sample(
+            (batch_size, sample_size, doc_size)).long().squeeze(-1)
+        
+        rouge2 = rt.rouge_recall_from_labels(
+            docs_tensors.unsqueeze(1), ref_word_counts.unsqueeze(1), 
+            labels2, length=10)
+
+        sample_docs2 = []
+        sample_refs2 = []
+        for batch in range(batch_size):
+            for sample in range(sample_size):
+                sample_doc = []
+                for i, label in enumerate(
+                        labels2[batch,sample,:len(docs[batch])]):
+                    if label.item() == 1:
+                        sample_doc.append(docs[batch][i])
+                sample_docs2.append("\n".join(sample_doc))
+                sample_refs2.append(summaries[batch])
+        ref_rouge2 = self.reference_rouge(
+            sample_docs2, sample_refs2, length=10).view(batch_size, 
+                                                        sample_size)
+        self.assertTensorEqual(rouge2, ref_rouge2)
+
+
+    def test_rouge_recall_from_indices_interface(self):
+
+        docs = [["a b c d", "e f g h", "a b c e", "a a a b b"],
+                ["d d d c e f", "z z d d", "e f f", "g f f e w", "a e f"]]
+        summaries = [["a a a b c d e s a f g e a a s f a",
+                      "z b b b d e a a g h t d k a j f s"],
+                     ["z z d e f w d d   d a g h e k a s"]]
+
+        docs_tensors = []
+        ref_word_counts = []
+        for docs_i, summaries_i in zip(docs, summaries):
+            dt, wc = rt.rouge_ngram_preprocess(docs_i, summaries_i, length=10)
+            docs_tensors.append(dt)
+            ref_word_counts.append(wc)
+        docs_tensors = rt.stack_documents(docs_tensors)  
+        self.assertTrue(docs_tensors.size(0) == 2)
+        self.assertTrue(docs_tensors.size(1) == 5)
+        self.assertTrue(docs_tensors.size(2) == 6)
+        ref_word_counts = rt.stack_word_counts(ref_word_counts)
+        self.assertTrue(ref_word_counts.size(0) == 2)
+        self.assertTrue(ref_word_counts.size(1) == 2)
+        self.assertTrue(ref_word_counts.size(2) == 12)
+        self.assertTrue(torch.all(ref_word_counts[0].sum(-1).eq(10)))
+        self.assertTensorEqual(
+            ref_word_counts[1].sum(-1).view(-1), torch.LongTensor([10, 0]))
+        
+        batch_size = docs_tensors.size(0)
+        doc_size = docs_tensors.size(1)
+        
+        indices1 = torch.LongTensor([[0,3,2],[1, 0, 2]])
+
+        labels1 = torch.distributions.Bernoulli(torch.tensor([.75])).sample(
+            (batch_size, doc_size)).long().squeeze(-1)
+        rouge1 = rt.rouge_recall_from_indices(
+            docs_tensors, ref_word_counts, 
+            indices1, length=10)
+
+        sample_docs1 = []
+        sample_refs1 = []
+        for batch in range(batch_size):
+                sample_doc = []
+                for idx in indices1[batch,:len(docs[batch])]:
+                    sample_doc.append(docs[batch][idx])
+                sample_docs1.append("\n".join(sample_doc))
+                sample_refs1.append(summaries[batch])
+        ref_rouge1 = self.reference_rouge(
+            sample_docs1, sample_refs1, length=10)
+        self.assertTensorEqual(rouge1, ref_rouge1)
+
+        sample_size = 3 
+        indices2 = torch.LongTensor([[[0, 3, 2], [1, 2, 3], [0, 3, 2]],  
+                                     [[1, 0, 2], [4, 3, 2], [0, 4, 3]]])
+        
+        rouge2 = rt.rouge_recall_from_indices(
+            docs_tensors, ref_word_counts.unsqueeze(1), 
+            indices2, length=10)
+
+        sample_docs2 = []
+        sample_refs2 = []
+        for batch in range(batch_size):
+            for sample in range(sample_size):
+                sample_doc = []
+                for idx in indices2[batch,sample,:len(docs[batch])]:
+                    sample_doc.append(docs[batch][idx])
+                sample_docs2.append("\n".join(sample_doc))
+                sample_refs2.append(summaries[batch])
+        ref_rouge2 = self.reference_rouge(
+            sample_docs2, sample_refs2, length=10).view(batch_size, 
+                                                        sample_size)
+        self.assertTensorEqual(rouge2, ref_rouge2)
+
+
+
+
 def suite():
     suite = unittest.TestSuite()
     suite.addTest(TestRedTorche("test_rouge_unigram_preprocess"))
     suite.addTest(TestRedTorche("test_word_counts"))
     suite.addTest(TestRedTorche("test_unigram_rouge1_recall_single_summary"))
+    suite.addTest(TestRedTorche("test_mask_length"))
+    suite.addTest(TestRedTorche("test_rouge_recall_interface"))
+    suite.addTest(TestRedTorche("test_rouge_recall_from_labels_interface"))
+    suite.addTest(TestRedTorche("test_rouge_recall_from_indices_interface"))
     return suite
 
 if __name__ == '__main__':
     runner = unittest.TextTestRunner()
     runner.run(suite())
-
-
-
-exit()
-
-print("\n\n\n")
-test_word_counts()
-
-

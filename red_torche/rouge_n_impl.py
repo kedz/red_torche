@@ -36,7 +36,7 @@ def word_counts(input, vocab_size):
 
     return sparse_wc.coalesce().to_dense().view(*batch_dims, -1)    
 
-def rouge_n(predicted_word_counts, reference_word_counts, reduction="mean"):
+def rouge_n(predicted_word_counts, reference_word_counts):
     predicted_word_counts = predicted_word_counts.unsqueeze(-2)
     overlap = torch.min(
         predicted_word_counts, reference_word_counts)
@@ -45,10 +45,21 @@ def rouge_n(predicted_word_counts, reference_word_counts, reduction="mean"):
     total_ref_ngrams = reference_word_counts.sum(-1).sum(-1).float()
     rouge = total_matches / total_ref_ngrams 
     return rouge
-    #if reduction == "mean" and rouge.size(-1) > 1:
-    #    return rouge.mean(-1, keepdim=True)
-    #else:
-    #    return rouge
 
 def mask_length(inputs, length):
-    pass
+
+    assert inputs.dim() >= 2
+
+    batch_dims = inputs.size()[:-2]
+    if not batch_dims:
+        batch_dims = (1,)
+    flat_batch_size = reduce(operator.mul, batch_dims, 1)
+    doc_size = inputs.size(-2)
+    sent_size = inputs.size(-1)
+    flat_doc_size = doc_size * sent_size
+
+    input_flat = inputs.view(flat_batch_size, flat_doc_size).gt(0).long()
+    input_flat_mask = torch.cumsum(input_flat, -1).gt(length)
+    output = inputs.masked_fill(input_flat_mask.view(inputs.size()), 0)
+
+    return output

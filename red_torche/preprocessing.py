@@ -44,3 +44,20 @@ def rouge_ngram_preprocess(document, summaries, ngram=1, length=100):
 
     return doc_tensor, summary_wc_tensor
 
+def stack_documents(input):
+    doc_size = max([input_i.size(0) for input_i in input])
+    sent_size = max([input_i.size(1) for input_i in input])
+    batch_size = len(input)
+    output = torch.LongTensor(batch_size, doc_size, sent_size).fill_(0)
+    for b, input_b in enumerate(input):
+        output[b,:input_b.size(0),:input_b.size(1)].copy_(input_b)
+    return output
+
+def stack_word_counts(input):
+    num_refs = max([input_i.size(1) for input_i in input])
+    vocab_size = max([input_i.size(2) for input_i in input])
+    batch_size = len(input) 
+    output = torch.LongTensor(batch_size, num_refs, vocab_size).fill_(0)
+    for b, input_b in enumerate(input):
+        output[b,:input_b.size(1),:input_b.size(2)].copy_(input_b[0])
+    return output
